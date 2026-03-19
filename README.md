@@ -1,256 +1,195 @@
-# ENflorA – ENA submission helper (biosamples, reads, assemblies)
+# ENflorA – Bulk submission of sequencing data to ENA
 
-Small collection of scripts to help submit to ENA:
+ENflorA is a small set of Python scripts that help you submit biological
+sequencing data to the [European Nucleotide Archive (ENA)](https://www.ebi.ac.uk/ena/browser/home).
+You fill in spreadsheets (Excel or TSV) with your metadata, point the scripts
+at your sequence files, and ENflorA handles XML generation, file compression,
+manifest creation, and submission.
 
-- **Biosample metadata** (BioSamples)
-- **Raw reads** (Experiments + Runs)
-- **Assemblies / annotations** (Analyses)
+It was originally built for plastid genome projects, but works for any organism
+with minor adjustments (see [Adapting to non-plant data](#adapting-to-non-plant-data)).
 
-using plain Python + Webin-CLI (for reads/assemblies) or `curl` (for biosamples). For a better understanding and documentation of the different ENA object types, please consult:  
-`https://ena-docs.readthedocs.io/en/latest/submit/general-guide/metadata.html`
-
-WARNING 1: Almost all data should be stored in either an Excel or tsv file. The column names and values are all defined inside the template excel, in the INFO sheet.
-
-WARNING 2: Prior to running ENflorA, the user must have a study number, or create one themselves, as per ENA, all ENA object types except biosamples must be associated with a study. This can be done at:  
-`https://www.ebi.ac.uk/ena/submit/webin/`
-
-WARNING 3: The scripts were originally written for plastid plant data. At the moment, `biosamples.py` is tied to the ENA plant checklist ERC000037 and plant-specific attributes. In `analysis.py`, chromosome-level submissions default to a single plastid circular chromosome (CHR_NAME=1, CHR_TYPE=Circular-Chromosome, CHR_LOCATION=Plastid) if no chromosome columns are provided. To use nuclear or other chromosomes, simply add `CHR_NAME`, `CHR_TYPE`, and `CHR_LOCATION` columns to your analysis table; their values are written directly into chr_list.txt. Apart from that, the logic is generic and can be used for other organisms as long as your metadata tables follow the expected columns.
+For background on ENA's object types and metadata model, see the
+[ENA submission documentation](https://ena-docs.readthedocs.io/en/latest/submit/general-guide/metadata.html).
 
 
 ## Index
 
-* [Folder layout](#folder-layout)
-* [What each script does](#what-each-script-does)
-
-  * [`hpc.sh`](#hpch)
-  * [`biosamples/biosamples.py`](#biosamplesbiosamplespy)
-  * [`runs/runs.py`](#runsrunspy)
-  * [`analysis/analysis.py`](#analysisanalysispy)
-  * [`lftp_sub.sh` (optional helper)](#lftp_subsh-optional-helper)
-* [How to run](#how-to-run)
-
-  * [1. Curta HPC via `hpc.sh` (FU Berlin)](#1-curta-hpc-via-hpcsh-fu-berlin)
-  * [2. Local / other HPC using `set_env.py`](#2-local--other-hpc-using-set_envpy)
-  * [3. Manual environment (no `set_env.py`)](#3-manual-environment-no-set_envpy)
-* [Configuration (`config.yaml`)](#configuration-configyaml)
-* [Requirements](#requirements)
-
-  * [Common to all modes](#common-to-all-modes)
-  * [If not running on the HPC](#if-not-running-on-the-hpc)
-* [Optional `lftp_sub.sh`](#optional-lftp_subsh)
-* [Logs and receipts](#logs-and-receipts)
+- [How it works](#how-it-works)
+- [Try it first: demo mode](#try-it-first-demo-mode)
+- [Requirements](#requirements)
+- [Installation and setup](#installation-and-setup)
+- [Configuration (`config.yaml`)](#configuration-configyaml)
+- [Folder layout](#folder-layout)
+- [Script reference](#script-reference)
+  - [`biosamples.py`](#biosamplespy)
+  - [`runs.py`](#runspy)
+  - [`analysis.py`](#analysispy)
+  - [`hpc.sh`](#hpcsh)
+  - [`lftp_sub.sh` (optional)](#lftp_subsh-optional)
+- [Adapting to non-plant data](#adapting-to-non-plant-data)
+- [Logs and receipts](#logs-and-receipts)
 
 
-## Folder layout
+## How it works
 
-Expected layout in the main working directory:
+ENflorA mirrors ENA's own data model. There are three scripts, each handling
+one type of ENA object, and **they must be run in this order** because each
+step produces accession IDs that the next step needs:
 
-```text
-ENflorA/
-├── biosamples/
-│   ├── biosamples.py
-│   └── BiosampleList.xlsx    // .tsv
-│
-├── runs/
-│   ├── runs.py
-│   └── ExperimentList.xlsx   // .tsv
-│
-├── analysis/
-│   ├── analysis.py
-│   └── AnalysisList.xlsx     // .tsv
-│
-├── config.yaml                 # shared config for all scripts
-├── set_env.py                  # creates/updates env/ folder for Python dependencies
-├── hpc.sh                      # Main script to use when using FUB's HPC
-├── lftp_sub.sh                 # optional script to upload (only reads) via lftp if main scripts fail
-├── credentials.txt             # Webin username (line 1) + password (line 2)
-├── webin-cli-*.jar             # Webin-CLI JAR
-└── README.md
+```
+ 1. Create a Study on ENA         (manual, one-time, via the Webin Portal)
+         ↓ study accession
+ 2. biosamples.py                 → registers your samples, returns SAMEA* accessions
+         ↓ sample accessions
+ 3. runs.py                       → uploads your raw reads, returns ERR* accessions
+         ↓ run accessions
+ 4. analysis.py                   → uploads your assemblies/annotations
 ```
 
-The Webin CLI jar file can be downloaded from `https://github.com/enasequence/webin-cli/releases`.
+You don't have to run all three. If your samples are already registered on ENA,
+skip `biosamples.py` and put the existing SAMEA accessions directly into your
+runs spreadsheet. Same for analysis — if your reads are already in ENA, just
+reference those run accessions.
 
-## What each script does
+### What each step does
 
-### `hpc.sh`
+**Study** — An umbrella grouping for your project. You create this once,
+manually, on the [Webin Portal](https://www.ebi.ac.uk/ena/submit/webin/)
+(or the [test portal](https://wwwdev.ebi.ac.uk/ena/submit/webin/) for dry runs).
 
-- Only one parameter must be set inside, `ena_object`, which it calls.
-- Can be called as a bash script or as a slurm job.
-- Script to run any of the following ENA object uploaders from FUB's HPC.
+**biosamples.py** — Registers biological source material: what organism, where
+and when it was collected, voucher IDs, GPS coordinates, etc. Takes a
+spreadsheet (`BiosampleList.xlsx`) and submits it as XML via `curl`. Returns
+one SAMEA accession per sample.
 
+**runs.py** — Uploads raw sequencing reads (FASTQ, BAM, or CRAM) together with
+library metadata (instrument, strategy, source). Takes a spreadsheet
+(`ExperimentList.xlsx`) plus your read files. Builds per-sample Webin-CLI
+manifests, compresses files, and submits. Returns one ERR accession per read set.
 
+**analysis.py** — Uploads genome assemblies or annotations (FASTA or EMBL flat
+files). Takes a spreadsheet (`AnalysisList.xlsx`) plus your sequence files.
+Can automatically convert GenBank (`.gb`) to EMBL format via Biopython. Handles
+contig, scaffold, and chromosome-level submissions. Returns one ERZ accession
+per assembly.
 
-### `biosamples/biosamples.py`
-
-- Keys in `config.yaml`: `data_biosamples`, `credentials`, `submit`, `live`.
-- Input: a metadata table (`BiosampleList.xlsx` or `.tsv`) with a header, and one row per biosample.
-- Outputs:
-  - `biosamples.xml`
-  - `submission.xml`
-  - optional submission to ENA’s BioSamples service (via `curl`).
-
-
-### `runs/runs.py`
-
-- Keys in `config.yaml`: `data_runs`, `sub_dir_runs`, `credentials`, `jar`, `submit`, `live`.
-- Input: table of read libraries (`ExperimentList.xlsx` / `.tsv`) with paths to FASTQ/BAM/CRAM.
-- Outputs:
-  - Per-sample `submission/<SAMPLE_ACCESSION>/manifest.txt`
-  - Staged and optionally compressed read files inside `submission/<SAMPLE>/`
-  - optional submission of all manifests via Webin-CLI (`-context reads`).
-
-
-### `analysis/analysis.py`
-
-- Keys in `config.yaml`: `data_analysis`, `sub_dir_analysis`, `credentials`, `jar`, `submit`, `live`, `assembly_level`, `mingaplength`.
-- Input: table of assemblies/annotations (`AnalysisList.xlsx` / `.tsv`) with paths to FASTA or EMBL/GenBank.
-- Outputs:
-  - Per-sample `submission/<SAMPLE_ACCESSION>/manifest.txt`
-  - Staged and optionally compressed FASTA/EMBL in `submission/<SAMPLE>/`
-  - optional submission of all manifests via Webin-CLI (`-context genome`).
-- Handles:
-  - GenBank → EMBL conversion via Biopython if needed.
-  - `assembly_level` and `mingaplength` logic for contig/scaffold/chromosome assemblies.
+Each spreadsheet template has a `DATA` sheet (where you fill in your rows) and
+an `INFO` sheet explaining every column. If you prefer plain text, the scripts
+also accept tab-separated files (`.tsv`, `.tab`, or `.txt`) with the same
+column headers.
 
 
-### `lftp_sub.sh` (optional helper)
+## Try it first: demo mode
 
-- Parameters must be set inside script.
-- Independent helper that:
-  - finds raw data files under given input paths,
-  - compresses them (if needed),
-  - makes `.md5` checksum files,
-  - uploads everything via `lftp` to a Webin FTP folder,
-  - writes a TSV (`remote_path <TAB> md5`) you can paste into ENA templates.
-- It does **not** call the Python scripts or Webin-CLI, it's a standalone script.
-- It requires the user to manually download the tsv template, and then upload to ENA, pasting in it the `remote_path` from the produced tsv. This can be done at their webpage, in the `Raw Reads (Experiments and Runs)` section:  
-`https://www.ebi.ac.uk/ena/submit/webin/`
-
-
-## How to run
-
-There are three supported ways to run the scripts. Pick the one that matches your setup.
-
----
-
-### 1. Curta HPC via `hpc.sh` (FU Berlin)
-
-Use this if you are on FU Berlin’s Curta cluster and want everything handled automatically.
-
-1. Inside `hpc.sh`, set which ENA object you want to run:
-
-   ```bash
-   # Possible values: biosamples, runs, analysis
-   ena_object="analysis"
-   ```
-
-2. Then, from the project root run:
-
-   ```bash
-   mkdir -p logs          # Here go the slurm log files
-   sbatch hpc.sh          # This sends the job to the queue
-   ```
-
-   It can be run on the login node for a quick non-Slurm test or light submissions, but recommended to go through slurm anyway:
-
-   ```bash
-   bash hpc.sh
-   ```
-
-What running through `hpc.sh` actually does:
-
-- Loads Curta modules:
-
-  ```bash
-  module purge
-  module load Python/3.11.3-GCCcore-12.3.0
-  module load Java/21.0.5
-  ```
-
-- Calls `python set_env.py -s -H` to:
-  - create or refresh `env/`,
-  - install/upgrade Python libraries inside `env/`,
-  - ensure Java is available via `module add Java/21.0.5`.
-- Activates the virtualenv:
-
-  ```bash
-  source env/bin/activate
-  ```
-
-- Runs the chosen script inside the corresponding subfolder, e.g.:
-
-  ```bash
-  cd analysis
-  python analysis.py
-  ```
-
-If you use `hpc.sh` you **do not** call `set_env.py` yourself; the job script does it for you.
-
----
-
-### 2. Local / other HPC using `set_env.py`
-
-Use this if you are **not** on Curta, but want `set_env.py` to manage the Python virtual environment for you.
-
-From the project root:
+Before using real data, you can do a complete dry run with bundled synthetic
+sequences. This verifies that your setup — credentials, Python, Java,
+Webin-CLI — is working end-to-end.
 
 ```bash
-# 1) Create or update env/ and install Python packages
-python set_env.py -s
-
-# 2) Spawn a new shell with the venv activated
-python set_env.py -r
+cd biosamples && python biosamples.py --demo
+cd runs      && python runs.py --demo
+cd analysis  && python analysis.py --demo
 ```
 
-If you are on some other HPC with a `module` system and want `set_env.py` to load Java before opening the shell:
+Demo mode submits to ENA's test server (data gets auto-deleted after a few
+days), prints verbose `[demo]` trace lines so you can see exactly what's
+happening, and is hardcoded to never touch the live server.
+
+See [`demo/README.md`](demo/README.md) for the full step-by-step walkthrough,
+including how to run it from the HPC.
+
+
+## Requirements
+
+What you need depends on how you run ENflorA.
+
+### On FU Berlin's Curta HPC (via `hpc.sh`)
+
+**Nothing.** The `hpc.sh` script loads all necessary modules (Python 3.11,
+Java 21), creates a virtual environment with all Python packages, and runs
+the scripts. You just need a Webin account and the Webin-CLI JAR file.
+
+### On any other machine (via `set_env.py`)
+
+`set_env.py` creates a virtual environment and installs Python packages for
+you, but you need the following already available on your system:
+
+| What | Needed for | Notes |
+|------|-----------|-------|
+| **Python ≥ 3.8** | all scripts | tested on 3.8–3.12 |
+| **Java ≥ 17** | `runs.py`, `analysis.py` | not needed for biosamples |
+| **curl** | `biosamples.py` | typically pre-installed on Linux/macOS |
+| **Webin-CLI JAR** | `runs.py`, `analysis.py` | [download here](https://github.com/enasequence/webin-cli/releases) |
+
+`set_env.py` handles the rest (pandas, openpyxl, pyyaml, biopython). On an
+HPC with a `module` system, add `-H` to also load Java.
+
+### Fully manual (no `set_env.py`)
+
+If you want to manage everything yourself, you need the system tools above
+plus these Python packages:
+
+| Package | Needed for | Minimum version |
+|---------|-----------|-----------------|
+| pandas | all scripts (data handling) | 1.2 |
+| PyYAML | all scripts (config file) | any |
+| openpyxl | reading `.xlsx` input files | 3.0 |
+| Biopython | `.gb` → `.embl` conversion in `analysis.py` only | 1.78 |
+
+Install with: `pip install pandas openpyxl pyyaml biopython`
+
+Biopython is only needed if you submit GenBank files that need conversion to
+EMBL format. If you only submit `.embl` or `.fasta` files, you can skip it.
+
+
+## Installation and setup
 
 ```bash
-python set_env.py -s -r -H
+git clone https://github.com/alfarodeprado/ENflorA.git
+cd ENflorA
 ```
 
-(You may need to edit the `module add Java/21.0.5` line in `set_env.py` to match your cluster.)
+Then pick one of these approaches:
 
-Once inside the environment shell:
+**Option A — HPC (FU Berlin Curta):**
+Set `ena_object` inside `hpc.sh` and submit with `sbatch hpc.sh`. The script
+loads Python/Java modules, creates the virtual environment, and runs everything.
+You don't need to call `set_env.py` yourself.
 
+**Option B — `set_env.py`:**
 ```bash
-cd biosamples   # or runs / analysis
-python biosamples.py
+python set_env.py -s     # create/update virtual environment
+python set_env.py -r     # open a shell with venv activated
+cd biosamples && python biosamples.py
+```
+On another HPC with `module` support, add `-H` to load Java:
+`python set_env.py -s -r -H`
+(You may need to edit the `module add Java/21.0.5` line in `set_env.py` to
+match your cluster.)
+
+**Option C — Manual:**
+```bash
+pip install pandas openpyxl biopython pyyaml
+cd biosamples && python biosamples.py
 ```
 
-You can either rely on `config.yaml` or pass explicit CLI options (see each script’s `--help`).
+### Credentials
 
----
-
-### 3. Manual environment (no `set_env.py`)
-
-If you prefer to manage everything yourself:
-
-1. Create and activate your own virtualenv or conda env (can do without, in case you do have the dependencies installed already, but it's recommended to use an environment).
-2. Install the required Python packages:
-
-   ```bash
-   pip install pandas openpyxl biopython pyyaml
-   ```
-
-3. Make sure the external tools you need are available (see **Requirements** below).
-4. Run scripts directly, for example:
-
-   ```bash
-   cd runs
-   python runs.py # Parameters are still read from the config file
-   ```
-
-In this mode `set_env.py` and `hpc.sh` are not used at all.
+Put your Webin login in `credentials.txt` at the repo root (two lines:
+username, then password). The file ships with placeholder values — replace
+them with your own. You can also pass credentials via `-u` / `-p` flags.
 
 
 ## Configuration (`config.yaml`)
 
-All three Python scripts use a shared YAML configuration (`config.yaml`, typically in the project root). The provided example looks like:
+All three scripts share a single YAML config in the repo root:
 
 ```yaml
 credentials: ../credentials.txt
 jar: ../webin-cli-8.2.0.jar
 
+# Paths to input tables. Can be .xlsx, .xls, .tsv, .tab, or .txt
 data_biosamples: BiosampleList.xlsx
 data_runs:       ExperimentList.xlsx
 data_analysis:   AnalysisList.xlsx
@@ -258,112 +197,164 @@ data_analysis:   AnalysisList.xlsx
 submit: True
 live:   False
 
-sub_dir_runs:
-sub_dir_analysis:
+sub_dir_biosamples:               # where biosamples XMLs and accessions go
+sub_dir_runs:                     # where runs submission folders go
+sub_dir_analysis:                 # where analysis submission folders go
 
 assembly_level: chromosome        # contig | scaffold | chromosome
 mingaplength: 50                  # used only if scaffold & no AGP
 ```
 
-**Parameters, precedence rules (important):**
+**Precedence:** each script checks the config file first. If a value is missing
+or empty, it falls back to the command-line argument. If both are unset, the
+script's internal default is used. So a non-empty config value overrides the
+CLI flag — if you want CLI control over a parameter, leave it blank in the
+config.
 
-For each script:
-
-1. It first looks in the config file for a value (e.g. `data_runs`).
-2. If the value in the config file is missing or empty, it falls back to the command‑line argument.
-3. If both are unset, the script’s internal default is used.
-
-So a non-empty config value **overrides** the corresponding CLI argument. In practical terms:
-
-- If you want to control something via the command line, leave the relevant key empty or remove it from `config.yaml`.
-- If you want to centralize settings, define them in `config.yaml` and call scripts with minimal flags.
+All data paths are resolved relative to the script's working directory (i.e.
+`biosamples/`, `runs/`, or `analysis/`), which is why the template values like
+`BiosampleList.xlsx` resolve to e.g. `biosamples/BiosampleList.xlsx`.
 
 
-## Requirements
+## Folder layout
 
-### Common to all modes
+```
+ENflorA/
+├── biosamples/
+│   ├── biosamples.py
+│   └── BiosampleList.xlsx       # template — fill in DATA sheet
+├── runs/
+│   ├── runs.py
+│   └── ExperimentList.xlsx      # template
+├── analysis/
+│   ├── analysis.py
+│   └── AnalysisList.xlsx        # template
+├── demo/                        # bundled test data for --demo mode
+│   ├── config.yaml
+│   ├── Demo*.xlsx
+│   ├── sequences/
+│   └── README.md
+├── config.yaml                  # shared config
+├── set_env.py                   # virtualenv setup helper
+├── hpc.sh                       # SLURM job script (FU Berlin)
+├── lftp_sub.sh                  # optional FTP upload helper
+├── credentials.txt              # Webin username + password
+└── webin-cli-*.jar              # Webin-CLI (download from ENA)
+```
 
-Regardless of how you run things:
+Each script writes its outputs into a `submission/` subdirectory within its
+own folder (e.g. `biosamples/submission/`, `runs/submission/`). This keeps
+generated files separate from your input data. The `submission/` directories
+are gitignored.
 
-- A Unix‑like OS (Linux/macOS; the shell scripts assume Bash).
-- An ENA **Webin account**.
-- A Webin‑CLI JAR file (e.g. `webin-cli-8.2.0.jar`) placed somewhere reachable, and referenced in `config.yaml` (`jar:`).  
+
+## Script reference
+
+### `biosamples.py`
+
+| | |
+|---|---|
+| **Config keys** | `data_biosamples`, `sub_dir_biosamples`, `credentials`, `submit`, `live` |
+| **Input** | `BiosampleList.xlsx` or `.tsv`/`.tab`/`.txt` — one row per sample |
+| **Outputs** | `submission/biosamples.xml`, `submission/submission.xml`, `submission/biosample_accessions.txt` |
+| **Submits via** | `curl` to ENA's REST API |
+
+The biosamples spreadsheet uses ENA's plant checklist
+[ERC000037](https://www.ebi.ac.uk/ena/browser/view/ERC000037). See [Adapting
+to non-plant data](#adapting-to-non-plant-data) if you're working with other
+organisms.
+
+Accessions are appended to `biosample_accessions.txt` across runs (not
+overwritten), with deduplication and a `(test)` suffix for test-server
+submissions.
+
+### `runs.py`
+
+| | |
+|---|---|
+| **Config keys** | `data_runs`, `sub_dir_runs`, `credentials`, `jar`, `submit`, `live` |
+| **Input** | `ExperimentList.xlsx` or `.tsv`/`.tab`/`.txt` — one row per read set, with paths to FASTQ/BAM/CRAM files |
+| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed read files per sample |
+| **Submits via** | Webin-CLI (`-context reads`) |
+
+Handles paired-end reads (FASTQ1 + FASTQ2 columns), single-end, BAM, and CRAM.
+Already-compressed files are symlinked rather than re-compressed.
+
+### `analysis.py`
+
+| | |
+|---|---|
+| **Config keys** | `data_analysis`, `sub_dir_analysis`, `credentials`, `jar`, `submit`, `live`, `assembly_level`, `mingaplength` |
+| **Input** | `AnalysisList.xlsx` or `.tsv`/`.tab`/`.txt` — one row per assembly, with either a `FLATFILE` (.embl/.gb) or `FASTA` column |
+| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed sequence files (+ `chr_list.txt` for chromosome-level) |
+| **Submits via** | Webin-CLI (`-context genome`) |
+
+Assembly level handling:
+- **Chromosome:** generates `chr_list.txt`. Defaults to a single circular
+  plastid chromosome; override with `CHR_NAME`, `CHR_TYPE`, `CHR_LOCATION`
+  columns in your spreadsheet.
+- **Scaffold:** requires either an `AGP` column or `MINGAPLENGTH` (set per-row
+  or globally in config).
+- **Contig:** no extra files needed.
+
+### `hpc.sh`
+
+SLURM job script for FU Berlin's Curta cluster. Set `ena_object` to
+`biosamples`, `runs`, or `analysis` inside the script, then `sbatch hpc.sh`.
+For demo mode, also set `demo="true"`.
+
+It loads the necessary modules (Python 3.11, Java 21), calls `set_env.py` to
+build the virtual environment, activates it, and runs the chosen script. You
+don't need to install anything or call `set_env.py` yourself.
+
+### `lftp_sub.sh` (optional)
+
+Standalone FTP upload helper for large read files when Webin-CLI uploads are
+too slow or unreliable for certain file sizes. Compresses files, generates MD5
+checksums, and uploads via `lftp` to ENA's FTP drop box with automatic resume.
+
+This script is completely independent from the three main Python scripts. It
+only handles the *upload*; you still need to register the files on ENA
+afterwards. The workflow is:
+
+1. Run `lftp_sub.sh` — it uploads your files and produces a helper TSV with
+   remote paths and MD5 values.
+2. Go to the Webin Portal → Submit Reads → download the spreadsheet template
+   for your file type.
+3. Fill in the template with your study/sample accessions, library metadata,
+   and the file paths + MD5s from the helper TSV.
+4. Upload the filled template back to the portal.
+
+Requirements: `bash`, `lftp`, `pigz` or `gzip`, `md5sum`.
 
 
-If running on FU Berlin's HPC, there are no software requirements, all necessary modules are already there or will be installed under `~/env/`. It's only necessary to check that python and java modules are available:
-  ```bash
-  module load Python/3.11.3-GCCcore-12.3.0
-  module load Java/21.0.5
-  ```
+## Adapting to non-plant data
 
-### If not running on the HPC
+Most of the pipeline is organism-agnostic. Two things have plant-specific
+defaults:
 
-If running set_env.py you will need:
+1. **`biosamples.py`** uses ENA checklist
+   [ERC000037](https://www.ebi.ac.uk/ena/browser/view/ERC000037) and expects
+   plant-specific columns (`plant structure`, `plant developmental stage`,
+   etc.). To adapt, modify the `expected_fields`, `mandatory`, and
+   `recommended` lists in `biosamples.py`, and change the `ENA-CHECKLIST`
+   value to match your target checklist.
 
-- **Python ≥ 3.8**  
-  All scripts are written for Python 3; tested on 3.8–3.12.
+2. **`analysis.py`** defaults to a single circular plastid chromosome for
+   chromosome-level submissions. To use nuclear or other chromosomes, add
+   `CHR_NAME`, `CHR_TYPE`, and `CHR_LOCATION` columns to your analysis
+   spreadsheet — their values are written directly into `chr_list.txt`.
 
-- **Java ≥ 17**  
-  Only for data files submission (runs and analysis objects), not necessary for biosample submission.
-
-- **curl**  
-  Only for biosample submission.
-
-If running individual scripts, apart from the requirements above:
-
-- **pandas ≥ 1.2**  
-  Used for data handling, and processing data tables.
-
-- **pyyaml**  
-  Used to read the configuration file.
-
-- **openpyxl ≥ 3.0**  
-  Required by pandas to parse `.xlsx` workbooks (Excel).
-
-- **biopython**  
-  Only needed in `analysis.py`, only when Genbank to EMBL format conversion required (`.gb` -> `.embl`).
-
-More often than not, just running `pip install "module_name"` works.
-
-## Optional `lftp_sub.sh`
-
-`lftp_sub.sh` is optional and completely independent from the Python / Webin‑CLI pipeline.
-
-To use it you need:
-
-- `bash`
-- `lftp`
-- `pigz` (for parallel gzip) **or** `gzip` (not both)
-- `md5sum` (Linux) or `md5` (macOS)
-
-Basic workflow:
-
-1. Edit the **CONFIG** block inside `lftp_sub.sh`, at the top:
-   - set `CREDENTIALS_FILE` or `WEBIN_USER` / `WEBIN_PASSWORD`,
-   - set `REMOTE_BASE_DIR` and optional `BATCH_SUBDIR`,
-   - set `OUT_TSV`,
-   - fill the `INPUTS=(...)` array with the file paths or folder.
-2. Run:
-
-   ```bash
-   ./lftp_sub.sh
-   ```
-
-3. Confirm when asked (unless you disable `ASK_CONFIRM_BEFORE_UPLOAD`).
-
-The script will then compress, checksum, and upload files, and write a TSV mapping remote paths to MD5 sums.
+`runs.py` requires no changes for any organism.
 
 
 ## Logs and receipts
 
-Each script writes basic receipts:
+All scripts write logs to a `logs/` directory:
 
-- `biosamples.py`
-  - stores XML receipts from ENA under `logs/`,
-  - appends accession mappings to a text file (e.g. `biosample_accessions.txt`).
+- `biosamples.py` saves XML receipts and appends accessions to
+  `submission/biosample_accessions.txt`.
+- `runs.py` and `analysis.py` create per-sample subfolders under `logs/`
+  and automatically clean stale validation caches before each submission.
 
-- `runs.py` and `analysis.py`
-  - create per‑sample log subfolders under `logs/` (e.g. `logs/SAMPLE_ID/reads/…` or `logs/SAMPLE_ID/genome/…`),
-  - automatically delete stale `validate.json` files before each submission so Webin‑CLI recalculates MD5s.
-
-It’s safe to delete `logs/` entirely if you want to start from a clean state; the scripts will recreate it.
+It's safe to delete `logs/` entirely to start fresh.

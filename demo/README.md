@@ -93,8 +93,7 @@ None of these `[demo]` lines appear during normal (non-demo) operation.
 
 ```
 demo/
-├── config.yaml                  # Config used by --demo (don't edit unless
-│                                #   you know what you're doing)
+├── config.yaml                  # Config used by --demo (don't edit unless you know what you're doing)
 ├── DemoBiosampleList.xlsx       # One Arabidopsis thaliana sample
 ├── DemoExperimentList.xlsx      # One paired-end Illumina MiSeq read set
 ├── DemoAnalysisList.xlsx        # Two rows: one FASTA + one EMBL flat file
