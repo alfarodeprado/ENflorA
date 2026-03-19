@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=bo-ena
+#SBATCH --job-name=ENflorA
 #SBATCH --mail-user=xxx@zedat.fu-berlin.de
-#SBATCH --output=logs/bo-ena_%j.out
-#SBATCH --error=logs/bo-ena_%j.err
+#SBATCH --output=logs/ENflorA_%j.out
+#SBATCH --error=logs/ENflorA_%j.err
 #SBATCH --time=1-10:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --qos=standard
@@ -14,11 +14,16 @@ set -euo pipefail
 # Usage: sbatch /hpc.sh
 
 ######################################################################
+######################################################################
 # Possible objects: "biosamples", "analysis", or "runs"
-ena_object="analysis"
+ena_object=""
+# Set to "true" to run in demo mode (uses bundled test data + test server)
+demo="true"
+######################################################################
 ######################################################################
 
-# Load environment
+
+# Load environment (update if needed in the future)
 module purge
 module load Python/3.11.3-GCCcore-12.3.0
 module load Java/21.0.5
@@ -33,8 +38,12 @@ source env/bin/activate
 run_script() {
   local dir="$1"
   local ena_object="$2"
-  echo "--- Running ${dir}/${ena_object} ---"
-  ( cd "$dir" && python "$ena_object" )
+  local extra_flags=""
+  if [ "$demo" = "true" ]; then
+    extra_flags="--demo"
+  fi
+  echo "--- Running ${dir}/${ena_object} ${extra_flags} ---"
+  ( cd "$dir" && python "$ena_object" "$extra_flags" )
 }
 
 # Dispatch based on ena_object

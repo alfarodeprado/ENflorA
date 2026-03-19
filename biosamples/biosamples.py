@@ -14,13 +14,25 @@ import re       # For date pattern matching
 import tempfile
 import shlex
 
+# --- Verbose logging (enabled by --demo) ---
+VERBOSE = False
+def vlog(msg):
+    """Print a verbose/debug message when running in demo mode."""
+    if VERBOSE:
+        print(f"  [demo] {msg}")
+
 def load_config(cfg_path: str = "../config.yaml") -> dict:
     """
     Return a dict with the YAML content or an empty dict if the file is absent.
     """
     if os.path.exists(cfg_path):
+        vlog(f"Loading config from: {os.path.abspath(cfg_path)}")
         with open(cfg_path, "r") as fh:
-            return yaml.safe_load(fh) or {}
+            cfg = yaml.safe_load(fh) or {}
+        for k, v in cfg.items():
+            vlog(f"  {k}: {v}")
+        return cfg
+    vlog(f"Config file not found at {cfg_path}, using defaults")
     return {}
 
 # Default ENA endpoints
@@ -28,6 +40,7 @@ TEST_ENDPOINT = "https://wwwdev.ebi.ac.uk/ena/submit/drop-box/submit/"
 LIVE_ENDPOINT = "https://www.ebi.ac.uk/ena/submit/drop-box/submit/"
 
 def load_table(path: str, case: str = "lower"):
+    vlog(f"Reading table: {os.path.abspath(path)}")
     ext = os.path.splitext(path)[1].lower()
     if ext in {".xlsx", ".xls"}:
         df = pd.read_excel(path, sheet_name=0)
@@ -40,10 +53,15 @@ def load_table(path: str, case: str = "lower"):
         df.columns = df.columns.str.upper()
     elif case == "lower":
         df.columns = df.columns.str.lower()
+    vlog(f"Table loaded: {len(df)} rows, columns: {list(df.columns)}")
     return df
 
 
-def excel_to_xml(table_file, output_xml="biosamples.xml"):
+def excel_to_xml(table_file, submission_dir="submission", output_xml="biosamples.xml"):
+    os.makedirs(submission_dir, exist_ok=True)
+    output_path = os.path.join(submission_dir, output_xml)
+    vlog(f"Output XML will be written to: {os.path.abspath(output_path)}")
+
     # Expected fields (in the expected order)
     expected_fields = [
         "isolate", "organism", "taxon_id", "bio_material", "specimen_voucher",
@@ -95,6 +113,8 @@ def excel_to_xml(table_file, output_xml="biosamples.xml"):
     
     # Any extra columns beyond expected_fields?
     extra_fields = [col for col in df.columns if col not in expected_fields]
+    if extra_fields:
+        vlog(f"Extra columns (will be added as optional attributes): {extra_fields}")
     
     # Create the root XML element
     root = ET.Element("SAMPLE_SET")
@@ -110,6 +130,7 @@ def excel_to_xml(table_file, output_xml="biosamples.xml"):
     # Process each row/sample
     for index, row in df.iterrows():
         row_number = index + 1
+        vlog(f"Processing row {row_number}: isolate='{row['isolate']}', organism='{row['organism']}', taxon_id={row['taxon_id']}")
 
         # Default plant growth medium if blank
         pgm = row["plant growth medium"]
@@ -141,6 +162,8 @@ def excel_to_xml(table_file, output_xml="biosamples.xml"):
                 except Exception:
                     # Fallback: pass through original text
                     date_str = raw_text
+
+        vlog(f"  Date: '{raw_date}' -> '{date_str}'")
 
         # Build the <SAMPLE> element
         sample = ET.SubElement(root, "SAMPLE", attrib={
@@ -186,18 +209,22 @@ def excel_to_xml(table_file, output_xml="biosamples.xml"):
         add_attribute(sample_attributes, "ENA-CHECKLIST", "ERC000037")
 
     # Pretty-print and write out
+    vlog(f"Generated XML with {len(df)} sample(s), writing to {output_path}")
     rough = ET.tostring(root, encoding="utf-8")
     pretty = minidom.parseString(rough).toprettyxml(indent="  ")
     try:
-        with open(output_xml, "w", encoding="utf-8") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(pretty)
-        print(f"{output_xml} file successfully written")
+        print(f"{output_path} file successfully written")
     except Exception as e:
-        sys.exit(f"Error writing {output_xml}: {e}")
+        sys.exit(f"Error writing {output_path}: {e}")
+
+    return submission_dir
 
 
 # Has <hold> so they don't become immediately public in case it goes to "live"
-def create_submission_xml(submission_xml="submission.xml"):
+def create_submission_xml(submission_dir="submission", submission_xml="submission.xml"):
+    path = os.path.join(submission_dir, submission_xml)
     submission_xml_content = '''<?xml version="1.0" encoding="UTF-8"?>
     <SUBMISSION>
         <ACTIONS>
@@ -210,12 +237,13 @@ def create_submission_xml(submission_xml="submission.xml"):
         </ACTIONS>
     </SUBMISSION>
     '''
-    if not os.path.exists(submission_xml):
-        with open(submission_xml, "w") as f:
+    os.makedirs(submission_dir, exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "w") as f:
             f.write(submission_xml_content)
-        print(f"{submission_xml} created.")
+        print(f"{path} created.")
     else:
-        print(f"{submission_xml} already exists.")
+        print(f"{path} already exists.")
 
 
 def prepare_logs_dir(logs_dir="logs"):
@@ -228,11 +256,17 @@ def prepare_logs_dir(logs_dir="logs"):
 
 
 # Uses the test submission as default, just in case
-def submit_data(username, password, logs_dir="logs", url=TEST_ENDPOINT):
+def submit_data(username, password, submission_dir="submission", logs_dir="logs", url=TEST_ENDPOINT):
+    vlog(f"Preparing submission to: {url}")
+    vlog(f"  Submission dir: {submission_dir}")
+    vlog(f"  Logs directory: {logs_dir}")
     # Build submission and receipt filenames
-    submission_file = "submission.xml"
+    submission_file = os.path.join(submission_dir, "submission.xml")
+    biosamples_file = os.path.join(submission_dir, "biosamples.xml")
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     receipt_file = os.path.join(logs_dir, f"biosample_receipt_{timestamp}.xml")
+    vlog(f"  Submission XML: {submission_file}")
+    vlog(f"  Sample XML: {biosamples_file}")
 
     # create a temporary netrc file for curl authentication
     if "://" in url:
@@ -244,13 +278,14 @@ def submit_data(username, password, logs_dir="logs", url=TEST_ENDPOINT):
         tf.write(f"machine {host}\nlogin {username}\npassword {password}\n")
     netrc_path = tf.name
     os.chmod(netrc_path, 0o600)
+    vlog(f"  Created temporary netrc for host: {host}")
 
     try:
         curl_command = [
             "curl",
             "--netrc-file", netrc_path,              # <— no -u flag
             "-F", f"SUBMISSION=@{submission_file}",
-            "-F", f"SAMPLE=@biosamples.xml",
+            "-F", f"SAMPLE=@{biosamples_file}",
             url,
             "-o", receipt_file
         ]
@@ -284,8 +319,8 @@ def submit_data(username, password, logs_dir="logs", url=TEST_ENDPOINT):
                 alias = samp.attrib.get('alias')
                 records.append((acc, alias))
 
-            # Write to text file
-            out_file = os.path.join(os.path.dirname(__file__), 'biosample_accessions.txt')
+            # Write to text file (appends, deduplicates)
+            out_file = os.path.join(submission_dir, 'biosample_accessions.txt')
             write_mode = "a+" if os.path.exists(out_file) else "w+"
             with open(out_file, write_mode) as out:
                 out.seek(0)
@@ -294,9 +329,9 @@ def submit_data(username, password, logs_dir="logs", url=TEST_ENDPOINT):
                     out.write("accession\talias\n")
                 for acc, alias in records:
                     line = f"{acc}\t{alias}"
+                    if url == TEST_ENDPOINT:
+                        line += " (test)"
                     if line not in existing:
-                        if url == TEST_ENDPOINT:
-                            line += " (test)"
                         out.write(line + "\n")
             print(f"Accessions written to {out_file}")
         except Exception as e:
@@ -306,6 +341,7 @@ def submit_data(username, password, logs_dir="logs", url=TEST_ENDPOINT):
 
 
 def load_credentials(file_path):
+    vlog(f"Loading credentials from: {os.path.abspath(file_path)}")
     try:
         with open(file_path) as cred:
             lines = [l.strip() for l in cred if l.strip()]
@@ -345,17 +381,31 @@ def main():
     parser.add_argument("--live", action="store_true",
                         help="Submit to the live ENA endpoint instead of test (DEV) endpoint")
 
+    parser.add_argument("--submission_dir", default="submission",
+                        help="Directory for generated XML and accession files (default: submission)")
+
     parser.add_argument("--logs_dir", default="logs",
                         help="Directory to store submission logs (default: logs)")
 
+    parser.add_argument("--demo", action="store_true",
+                        help="Run in demo mode: use bundled test data from demo/ "
+                             "and submit to the ENA test server")
+
     args = parser.parse_args()
+
+    # --- Demo mode override ---
+    if args.demo:
+        global VERBOSE
+        VERBOSE = True
+        args.config = "../demo/config.yaml"
+        print("=" * 60)
+        print("  DEMO MODE — using bundled test data")
+        print("  Config: demo/config.yaml")
+        print("  Submission target: ENA test server (live is disabled)")
+        print("=" * 60)
 
     cfg = load_config(args.config)
 
-    # excel_path = cfg.get("excel_biosamples")
-    # if not excel_path:
-    #     excel_path = args.convert
-    
     table_path = cfg.get("data_biosamples")
     if not table_path:
         table_path = args.convert
@@ -368,14 +418,28 @@ def main():
     if not cred_path:
         cred_path = args.cred_file
 
+    sub_dir = cfg.get("sub_dir_biosamples")
+    if not sub_dir:
+        sub_dir = args.submission_dir
+
     live = cfg.get("live")
     if not live:
         live = args.live
+
+    # Safety: demo mode never goes to the live server
+    if args.demo and live:
+        print("WARNING: --demo overrides live=True → submitting to test server only.")
+        live = False
+
+    vlog(f"Resolved parameters:")
+    vlog(f"  table_path = {table_path}")
+    vlog(f"  submit     = {submit}")
+    vlog(f"  sub_dir    = {sub_dir}")
+    vlog(f"  cred_path  = {cred_path}")
+    vlog(f"  live       = {live}")
     
-    # if excel_path:
-    #     excel_to_xml(excel_path)
     if table_path:
-        excel_to_xml(table_path)
+        excel_to_xml(table_path, submission_dir=sub_dir)
 
     if submit:
         # Load or override credentials
@@ -384,11 +448,11 @@ def main():
         else:
             user, pw = load_credentials(cred_path)
 
-        create_submission_xml()
+        create_submission_xml(submission_dir=sub_dir)
         logs = prepare_logs_dir(args.logs_dir)
         endpoint = LIVE_ENDPOINT if live else TEST_ENDPOINT
         print(f"Using endpoint: {endpoint}")
-        submit_data(user, pw, logs, endpoint)
+        submit_data(user, pw, submission_dir=sub_dir, logs_dir=logs, url=endpoint)
 
     if not table_path and not submit:
         parser.print_help()

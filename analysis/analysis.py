@@ -13,13 +13,25 @@ import glob
 from collections import defaultdict
 from typing import Optional
 
+# --- Verbose logging (enabled by --demo) ---
+VERBOSE = False
+def vlog(msg):
+    """Print a verbose/debug message when running in demo mode."""
+    if VERBOSE:
+        print(f"  [demo] {msg}")
+
 def load_config(cfg_path: str = "../config.yaml") -> dict:
     """
     Return a dict with the YAML content or an empty dict if the file is absent.
     """
     if os.path.exists(cfg_path):
+        vlog(f"Loading config from: {os.path.abspath(cfg_path)}")
         with open(cfg_path, "r") as fh:
-            return yaml.safe_load(fh) or {}
+            cfg = yaml.safe_load(fh) or {}
+        for k, v in cfg.items():
+            vlog(f"  {k}: {v}")
+        return cfg
+    vlog(f"Config file not found at {cfg_path}, using defaults")
     return {}
 
 def load_table(path: str, case: str = "upper"):
@@ -27,6 +39,7 @@ def load_table(path: str, case: str = "upper"):
     Read first-sheet Excel (.xlsx/.xls) or TSV (.tsv/.tab/.txt) into a DataFrame.
     Normalizes header whitespace and case.
     """
+    vlog(f"Reading table: {os.path.abspath(path)}")
     ext = os.path.splitext(path)[1].lower()
     if ext in {".xlsx", ".xls"}:
         df = pd.read_excel(path, sheet_name=0)
@@ -40,6 +53,7 @@ def load_table(path: str, case: str = "upper"):
         df.columns = df.columns.str.upper()
     elif case == "lower":
         df.columns = df.columns.str.lower()
+    vlog(f"Table loaded: {len(df)} rows, columns: {list(df.columns)}")
     return df
 
 def stage_file(src_path: str, dest_dir: str, mode: str = "cp") -> str:
@@ -62,12 +76,14 @@ def stage_file(src_path: str, dest_dir: str, mode: str = "cp") -> str:
         dst = os.path.join(dest_dir, os.path.basename(src))
         if os.path.abspath(src) != os.path.abspath(dst):
             shutil.copy(src, dst)
+        vlog(f"  Staged (copy): {src} -> {dst}")
         return os.path.basename(dst)
 
     # mode == "cmp"
     dst_gz = os.path.join(dest_dir, os.path.basename(src) + ".gz")
     with open(src, "rb") as f_in, gzip.open(dst_gz, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out, length=1024 * 1024)
+    vlog(f"  Staged (compress): {src} -> {dst_gz}")
     return os.path.basename(dst_gz)
 
 def extract_first_accession(path):
@@ -141,6 +157,8 @@ def convert_manifests(table_file: str, submission_dir: str = "submission", defau
     has_chr_loc  = "CHR_LOCATION" in optional_cols
 
     os.makedirs(submission_dir, exist_ok=True)
+    vlog(f"Submission directory: {os.path.abspath(submission_dir)}")
+    vlog(f"Default assembly level: {default_level}, mingaplength: {default_mingaplength}")
     manifest_paths = []
 
     for idx, row in df.iterrows():
@@ -153,6 +171,7 @@ def convert_manifests(table_file: str, submission_dir: str = "submission", defau
 
         samp_dir = os.path.join(submission_dir, sample_id)
         os.makedirs(samp_dir, exist_ok=True)
+        vlog(f"Row {n}: sample={sample_id}, study={row['STUDY']}, run_ref={row['RUN_REF']}")
 
         # Data file: exactly one of FLATFILE or FASTA
         flat = str(row.get("FLATFILE", "")).strip()
@@ -165,7 +184,9 @@ def convert_manifests(table_file: str, submission_dir: str = "submission", defau
         if has_flat:
             path_in = os.path.abspath(flat)
             ext = os.path.splitext(path_in)[1].lower()
+            vlog(f"  Data source: FLATFILE={flat} (ext={ext})")
             if ext == ".gb":
+                vlog(f"  Converting GenBank -> EMBL via Biopython")
                 try:
                     from Bio import SeqIO  # lazy import
                 except ImportError:
@@ -181,20 +202,25 @@ def convert_manifests(table_file: str, submission_dir: str = "submission", defau
                     sys.exit(f"Row {n}: no records written converting {path_in}")
                 print(f"[Row {n}] Converted {path_in} → {embl_path} ({count} recs)")
                 seqname = extract_first_accession(embl_path)
+                vlog(f"  Extracted accession from EMBL: {seqname}")
                 data_field = ("FLATFILE", stage_file(embl_path, samp_dir, mode="cmp"))
 
             elif ext == ".embl":
                 seqname = extract_first_accession(path_in)
+                vlog(f"  Extracted accession from EMBL: {seqname}")
                 data_field = ("FLATFILE", stage_file(path_in, samp_dir, mode="cmp"))
             else:
                 sys.exit(f"Row {n}: FLATFILE must end in .gb or .embl, not '{ext}'")
         else:
             src = os.path.abspath(fasta)
+            vlog(f"  Data source: FASTA={fasta}")
             seqname = extract_first_accession(src)            # read the original to get the first header
+            vlog(f"  Extracted accession from FASTA header: {seqname}")
             data_field = ("FASTA", stage_file(src, samp_dir, mode="cmp"))
 
         # Determine assembly level
         level = _norm_level(row.get("ASSEMBLY_LEVEL") if has_level_col else default_level)
+        vlog(f"  Assembly level: {level}")
 
         # Prepare optional files/fields depending on level
         agp_field = None
@@ -206,6 +232,7 @@ def convert_manifests(table_file: str, submission_dir: str = "submission", defau
             chr_name = str(row.get("CHR_NAME", "1")).strip() if has_chr_name else "1"
             chr_type = str(row.get("CHR_TYPE", "Circular-Chromosome")).strip() if has_chr_type else "Circular-Chromosome"
             chr_loc  = str(row.get("CHR_LOCATION", "Plastid")).strip() if has_chr_loc else "Plastid"
+            vlog(f"  Chromosome list: name={chr_name}, type={chr_type}, location={chr_loc}")
 
             chr_txt = os.path.join(samp_dir, "chr_list.txt")
             with open(chr_txt, "w") as f:
@@ -288,6 +315,7 @@ def prepare_logs_dir(logs_dir="logs"):
     return logs_dir
 
 def load_credentials(path):
+    vlog(f"Loading credentials from: {os.path.abspath(path)}")
     if not os.path.isfile(path):
         sys.exit(f"Credentials file not found: {path}")
     lines = [l.strip() for l in open(path) if l.strip()]
@@ -298,6 +326,7 @@ def load_credentials(path):
 def find_jar(jar_arg):
     if jar_arg:
         if os.path.isfile(jar_arg):
+            vlog(f"Using Webin-CLI JAR: {os.path.abspath(jar_arg)}")
             return jar_arg
         sys.exit(f"JAR not found at {jar_arg}")
     webin = [m for m in glob.glob("*.jar") if "webin-cli" in m]
@@ -318,6 +347,7 @@ def drop_cached_validation(log_subdir: str):
             print(f"  Could not remove {path}: {exc}")
 
 def submit_manifests(manifests, jar, user, pwd, live, logs_dir):
+    vlog(f"Submitting {len(manifests)} manifest(s) via Webin-CLI (context=genome, live={live})")
     for mf in manifests:
         inp = os.path.dirname(mf)
         sample_id = os.path.basename(inp)
@@ -393,8 +423,24 @@ def main():
     p.add_argument(
     "--mingaplength", type=int,
     help="Default MINGAPLENGTH when submitting scaffolds without AGP")
+
+    p.add_argument(
+        "--demo", action="store_true",
+        help="Run in demo mode: use bundled test data from demo/ "
+             "and submit to the ENA test server")
     
     args = p.parse_args()
+
+    # --- Demo mode override ---
+    if args.demo:
+        global VERBOSE
+        VERBOSE = True
+        args.config = "../demo/config.yaml"
+        print("=" * 60)
+        print("  DEMO MODE — using bundled test data")
+        print("  Config: demo/config.yaml")
+        print("  Submission target: ENA test server (live is disabled)")
+        print("=" * 60)
 
     # pull YAML config
     cfg = load_config(args.config)
@@ -424,6 +470,12 @@ def main():
     live = cfg.get("live")
     if not live:
         live = args.live
+
+    # Safety: demo mode never goes to the live server
+    if args.demo and live:
+        print("WARNING: --demo overrides live=True → submitting to test server only.")
+        live = False
+
     # 7. assembly level (chromosome, scaffold or contig) and mingaplength for scaffold and no agp file
     default_level = cfg.get("assembly_level")
     if not default_level:
@@ -431,6 +483,16 @@ def main():
     default_mingap = cfg.get("mingaplength")
     if not default_mingap:
         default_mingap = args.mingaplength
+
+    vlog(f"Resolved parameters:")
+    vlog(f"  table_path     = {table_path}")
+    vlog(f"  submit         = {submit}")
+    vlog(f"  sub_dir        = {sub_dir}")
+    vlog(f"  cred_path      = {cred_path}")
+    vlog(f"  jar_path       = {jar_path}")
+    vlog(f"  live           = {live}")
+    vlog(f"  assembly_level = {default_level}")
+    vlog(f"  mingaplength   = {default_mingap}")
 
     manifests = []
     if table_path:

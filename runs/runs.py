@@ -12,16 +12,29 @@ import shutil
 import glob
 from collections import defaultdict
 
+# --- Verbose logging (enabled by --demo) ---
+VERBOSE = False
+def vlog(msg):
+    """Print a verbose/debug message when running in demo mode."""
+    if VERBOSE:
+        print(f"  [demo] {msg}")
+
 def load_config(cfg_path: str = "../config.yaml") -> dict:
     """
     Return a dict with the YAML content or an empty dict if the file is absent.
     """
     if os.path.exists(cfg_path):
+        vlog(f"Loading config from: {os.path.abspath(cfg_path)}")
         with open(cfg_path, "r") as fh:
-            return yaml.safe_load(fh) or {}
+            cfg = yaml.safe_load(fh) or {}
+        for k, v in cfg.items():
+            vlog(f"  {k}: {v}")
+        return cfg
+    vlog(f"Config file not found at {cfg_path}, using defaults")
     return {}
 
 def load_table(path: str, case: str = "upper"):
+    vlog(f"Reading table: {os.path.abspath(path)}")
     ext = os.path.splitext(path)[1].lower()
     if ext in {".xlsx", ".xls"}:
         df = pd.read_excel(path, sheet_name=0)
@@ -34,6 +47,7 @@ def load_table(path: str, case: str = "upper"):
         df.columns = df.columns.str.upper()
     elif case == "lower":
         df.columns = df.columns.str.lower()
+    vlog(f"Table loaded: {len(df)} rows, columns: {list(df.columns)}")
     return df
 
 def convert_manifests(table_file, submission_dir="submission"):
@@ -55,6 +69,8 @@ def convert_manifests(table_file, submission_dir="submission"):
     file_cols = [c for c in df.columns if c.upper() in ("BAM", "CRAM") or c.upper().startswith("FASTQ")]
     if not file_cols:
         sys.exit("No file columns (BAM, CRAM, FASTQ) found in table header")
+    vlog(f"File columns detected: {file_cols}")
+    vlog(f"Submission directory: {os.path.abspath(submission_dir)}")
 
     os.makedirs(submission_dir, exist_ok=True)
     manifest_paths = []
@@ -71,6 +87,7 @@ def convert_manifests(table_file, submission_dir="submission"):
             sample_id = f"{raw_id}_{sample_counts[raw_id]}"
         samp_dir = os.path.join(submission_dir, sample_id)
         os.makedirs(samp_dir, exist_ok=True)
+        vlog(f"Row {n}: sample={sample_id}, study={row['STUDY']}, dir={samp_dir}")
 
         # Collect file entries
         entries = []
@@ -80,6 +97,7 @@ def convert_manifests(table_file, submission_dir="submission"):
                 entries.append((col, str(val).strip()))
         if not entries:
             sys.exit(f"Row {n}: no files specified in any of {', '.join(file_cols)}")
+        vlog(f"  Files: {[rel for _, rel in entries]}")
 
 
         # Determine file type in case of paired reads, or more than one type, based on paths' extensions
@@ -98,6 +116,7 @@ def convert_manifests(table_file, submission_dir="submission"):
         if len(types) != 1:
             sys.exit(f"Row {n}: mixed file types in one row: {types}")
         filetype = types.pop()
+        vlog(f"  Detected file type: {filetype}")
 
         # Validate counts
         if filetype in ("BAM", "CRAM") and len(entries) != 1:
@@ -114,6 +133,7 @@ def convert_manifests(table_file, submission_dir="submission"):
                 sys.exit(f"Row {n}: file not found: {src}")
             # if file is already in samp_dir, just add to manifest
             if os.path.dirname(src) == os.path.abspath(samp_dir):
+                vlog(f"  '{rel}': already in submission dir, using as-is")
                 compressed_files.append(os.path.basename(src))
                 continue
             # if already .gz then soft-link into samp_dir
@@ -124,12 +144,14 @@ def convert_manifests(table_file, submission_dir="submission"):
                         os.symlink(src, link_path)         # relative link
                     except OSError:
                             raise
+                vlog(f"  '{rel}': already compressed, symlinking to {link_path}")
                 compressed_files.append(os.path.basename(link_path))
                 continue
 
             # if not .gz then stream-compress right into samp_dir
             gz_name = os.path.basename(src) + ".gz"
             dst = os.path.join(samp_dir, gz_name)
+            vlog(f"  '{rel}': compressing to {dst}")
 
             with open(src, "rb") as f_in, gzip.open(dst, "wb", compresslevel=6) as f_out:
                 shutil.copyfileobj(f_in, f_out, length=1024 * 1024)  # 1 MiB chunks
@@ -165,6 +187,7 @@ def prepare_logs_dir(logs_dir="logs"):
     return logs_dir
 
 def load_credentials(path):
+    vlog(f"Loading credentials from: {os.path.abspath(path)}")
     if not os.path.isfile(path):
         sys.exit(f"Credentials file not found: {path}")
     lines = [l.strip() for l in open(path) if l.strip()]
@@ -175,6 +198,7 @@ def load_credentials(path):
 def find_jar(jar_arg):
     if jar_arg:
         if os.path.isfile(jar_arg):
+            vlog(f"Using Webin-CLI JAR: {os.path.abspath(jar_arg)}")
             return jar_arg
         sys.exit(f"JAR not found at {jar_arg}")
     webin = [m for m in glob.glob("*.jar") if "webin-cli" in m]
@@ -197,6 +221,7 @@ def drop_cached_validation(log_subdir: str):
             print(f"  Could not remove {path}: {exc}")
 
 def submit_manifests(manifests, jar, user, pwd, live, logs_dir):
+    vlog(f"Submitting {len(manifests)} manifest(s) via Webin-CLI (context=reads, live={live})")
     for mf in manifests:
         inp = os.path.dirname(mf)
         sample_id = os.path.basename(inp)
@@ -268,7 +293,23 @@ def main():
         "--logs_dir", default="logs",
         help="Where Webin-CLI writes its receipts")
     
+    p.add_argument(
+        "--demo", action="store_true",
+        help="Run in demo mode: use bundled test data from demo/ "
+             "and submit to the ENA test server")
+    
     args = p.parse_args()
+
+    # --- Demo mode override ---
+    if args.demo:
+        global VERBOSE
+        VERBOSE = True
+        args.config = "../demo/config.yaml"
+        print("=" * 60)
+        print("  DEMO MODE — using bundled test data")
+        print("  Config: demo/config.yaml")
+        print("  Submission target: ENA test server (live is disabled)")
+        print("=" * 60)
 
     # pull YAML config
     cfg = load_config(args.config)
@@ -298,6 +339,19 @@ def main():
     live = cfg.get("live")
     if not live:
         live = args.live
+
+    # Safety: demo mode never goes to the live server
+    if args.demo and live:
+        print("WARNING: --demo overrides live=True → submitting to test server only.")
+        live = False
+
+    vlog(f"Resolved parameters:")
+    vlog(f"  table_path = {table_path}")
+    vlog(f"  submit     = {submit}")
+    vlog(f"  sub_dir    = {sub_dir}")
+    vlog(f"  cred_path  = {cred_path}")
+    vlog(f"  jar_path   = {jar_path}")
+    vlog(f"  live       = {live}")
 
     manifests = []
     if table_path:

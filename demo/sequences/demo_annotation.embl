@@ -1,0 +1,72 @@
+ID   ENflorA_demo_contig_1; SV 1; linear; genomic DNA; HTG; PLN; 513 BP.
+XX
+AC   ENflorA_demo_contig_1;
+XX
+DE   Arabidopsis thaliana synthetic demo contig 1 for ENflorA testing
+XX
+KW   .
+XX
+OS   Arabidopsis thaliana (thale cress)
+OC   Eukaryota; Viridiplantae; Streptophyta; Embryophyta; Tracheophyta;
+OC   Spermatophyta; Magnoliopsida; eudicotyledons; Gunneridae; Pentapetalae;
+OC   rosids; malvids; Brassicales; Brassicaceae; Camelineae; Arabidopsis.
+XX
+RN   [1]
+RA   ENflorA Demo;
+RT   ;
+RL   Unpublished.
+XX
+FH   Key             Location/Qualifiers
+FH
+FT   source          1..513
+FT                   /organism="Arabidopsis thaliana"
+FT                   /mol_type="genomic DNA"
+FT                   /note="synthetic demo sequence for ENflorA testing"
+XX
+SQ   Sequence 513 BP; 132 A; 121 C; 125 G; 135 T; 0 other;
+     taaagttccg ttcagttcac gtgcgtttaa gctgcgtaga gcggcaatga tatatcagaa        60
+     ttgtcgagcc ctaaaaaacg ggagaatcaa tgtttaggct ttcctgcagc atgatgtcgg       120
+     gcgtgtcctc cgcttgtccg acacccgagt tacatccagt acctcccgga aatcgttcgc       180
+     tgggtataat gctgattcgt ggtggtaaat atttccccct acaatagatc tgaattcacc       240
+     cgaccgaagc agccgctatc aaatgcatca gatggagggg ttattagggt atatctttga       300
+     gcccagttcg acgacactca agatgtctac cggactagac acagtagaca gtcccgcacc       360
+     tcatgtagaa aaattgtctc atatttgaac gttttcgaaa cgaaatcgtt gggtcgtaga       420
+     tagcattaca tctggctgtg ccgatgagtt gaaccgagcc agacgatgtg gcgcaggtat       480
+     ctgatacgtt gcaggttcct atacccacgc tgt                                    513
+//
+ID   ENflorA_demo_contig_2; SV 1; linear; genomic DNA; HTG; PLN; 526 BP.
+XX
+AC   ENflorA_demo_contig_2;
+XX
+DE   Arabidopsis thaliana synthetic demo contig 2 for ENflorA testing
+XX
+KW   .
+XX
+OS   Arabidopsis thaliana (thale cress)
+OC   Eukaryota; Viridiplantae; Streptophyta; Embryophyta; Tracheophyta;
+OC   Spermatophyta; Magnoliopsida; eudicotyledons; Gunneridae; Pentapetalae;
+OC   rosids; malvids; Brassicales; Brassicaceae; Camelineae; Arabidopsis.
+XX
+RN   [1]
+RA   ENflorA Demo;
+RT   ;
+RL   Unpublished.
+XX
+FH   Key             Location/Qualifiers
+FH
+FT   source          1..526
+FT                   /organism="Arabidopsis thaliana"
+FT                   /mol_type="genomic DNA"
+FT                   /note="synthetic demo sequence for ENflorA testing"
+XX
+SQ   Sequence 526 BP; 147 A; 114 C; 141 G; 124 T; 0 other;
+     gaataaggta ccaccaaagt tactcttatg ggggcccgcc cgcactaacg cgatgcctct        60
+     aaaatgctcg tggtacgtta actgtacgag cggccatctt tgtgacttgg agatgggtcg       120
+     agcgtcgtca aagtgggctc gcaaaattgg ttgcatgcat catgttggta agcaggcaca       180
+     tttgtaattg ccaccatcag aacggctaaa cagaatgtac atagtcgcgt gttgcaccat       240
+     tactcccgtg gtattgtaag agtcggacag gttgggaaca cattgtgaat agggaggtgt       300
+     acttccaaca aggcgcgatt tttcggtcat gcatgcatta agcgtgatat cagcgaaagt       360
+     attttaatac gaccttacgg atctggtagc cgggaccagt gaaaaaacgg ggataaatgt       420
+     cctaaactcc agtaatagaa taggaaggcc tcccgcaggc ggggcaagca agacgtatcg       480
+     caactaagtg gtcatacagc attggacgct gaggctatcc ataact                      526
+//

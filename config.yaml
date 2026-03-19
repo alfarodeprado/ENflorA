@@ -17,6 +17,7 @@ live: False
 
 # Paths to where you want to store the files for submission.
 # If empty it will be set to the current working directory by default
+sub_dir_biosamples:                       # biosamples submission files (XMLs, accessions)
 sub_dir_runs:                             # analysis submission files
 sub_dir_analysis:                         # runs submission files
 

@@ -1,0 +1,28 @@
+# Demo configuration for ENflorA.
+#
+# Used automatically when any script is called with --demo.
+# Submits bundled dummy data to the ENA TEST server so users can
+# verify their setup (credentials, Java, Webin-CLI) works end-to-end
+# without preparing real data first.
+#
+# All paths are relative to the script's working directory,
+# i.e. biosamples/, runs/, or analysis/.
+
+credentials: ../credentials.txt
+jar: ../webin-cli-8.2.0.jar
+
+data_biosamples: ../demo/DemoBiosampleList.xlsx
+data_runs:       ../demo/DemoExperimentList.xlsx
+data_analysis:   ../demo/DemoAnalysisList.xlsx
+
+# Always submit, never live: demo data goes to the test server only.
+submit: True
+live:   False
+
+# Keep demo outputs separate from real submission files.
+sub_dir_biosamples: demo_submission
+sub_dir_runs:       demo_submission
+sub_dir_analysis:   demo_submission
+
+# Analysis-specific (the demo FASTA is a single contig).
+assembly_level: contig
