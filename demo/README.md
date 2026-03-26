@@ -9,6 +9,7 @@ All sequence files here are random synthetic DNA. The ENA test server checks
 that the format is valid but doesn't care about biological meaning, and it
 automatically deletes test submissions after a few days.
 
+
 ## Before you start
 
 You'll need:
@@ -20,10 +21,17 @@ You'll need:
 
   Note the study accession you get (something like `PRJEB99999`).
 
+Open `demo/DemoExperimentList.xlsx` and `demo/DemoAnalysisList.xlsx` and paste
+the study accession into the STUDY column (cell A2 in the experiment sheet;
+cells A2 and A3 in the analysis sheet, since it has two rows).
+
+
 ## Step-by-step walkthrough
 
 The steps **must be run in this order**, because each one produces accession
 IDs that the next step needs. This is the same as a real submission.
+
+All commands below assume you start from the ENflorA root directory.
 
 ### Step 1 — Register demo biosamples
 
@@ -36,35 +44,48 @@ Then run:
 ```bash
 cd biosamples
 python biosamples.py --demo
+cd ..
 ```
 
 Or, if you're on the HPC, set `ena_object="biosamples"` and `demo="true"` in
-`hpc.sh`, then `sbatch hpc.sh`.
+`hpc.sh`, then run `sbatch hpc.sh` from the ENflorA root.
 
-Look for the SAMEA accession in the output. You'll need it for the next two
-steps: open `demo/DemoExperimentList.xlsx` and `demo/DemoAnalysisList.xlsx`
-and paste it into the SAMPLE column (cell B2; for the analysis sheet, paste
-it into B2 **and** B3, since it has two rows).
+**Where to find the accession:** On successful submission, the script prints
+the assigned SAMEA accession(s) directly to the terminal (or to the SLURM
+`.out` file on HPC: `logs/ENflorA_<jobid>.out`). The accession is also saved
+to `biosamples/demo_submission/biosample_accessions.txt`.
+
+You'll need the SAMEA accession for the next two steps. Open
+`demo/DemoExperimentList.xlsx` and `demo/DemoAnalysisList.xlsx` and paste it
+into the SAMPLE column (cell B2 in the experiment sheet; cells B2 and B3 in
+the analysis sheet).
 
 ### Step 2 — Submit demo reads
 
-Make sure you've pasted your test study accession into cell A2 of
-`demo/DemoExperimentList.xlsx` (and the SAMEA from step 1 into B2).
+Make sure you've filled in STUDY (from step 0) and SAMPLE (from step 1) in
+`demo/DemoExperimentList.xlsx`.
 
 ```bash
 cd runs
 python runs.py --demo
+cd ..
 ```
 
-Or HPC: `ena_object="runs"`, `demo="true"`.
+Or HPC: set `ena_object="runs"` and `demo="true"` in `hpc.sh`, then
+`sbatch hpc.sh`.
 
-Look for the ERR accession in the output. Open `demo/DemoAnalysisList.xlsx`
-and paste it into the RUN_REF column (cells C2 and C3).
+**Where to find the accession:** Webin-CLI prints the assigned ERR accession
+in the terminal output (look for "The following run accession was assigned to
+the submission"). On HPC, check `logs/ENflorA_<jobid>.out`. The submission
+report is also at `runs/logs/<SAMPLE>/webin-cli.report`.
+
+Open `demo/DemoAnalysisList.xlsx` and paste the ERR accession into the
+RUN_REF column (cells C2 and C3).
 
 ### Step 3 — Submit demo assemblies
 
 This step needs accessions from **both** previous steps (SAMEA from step 1,
-ERR from step 2), so make sure you've filled those in first.
+ERR from step 2), so make sure you've filled those in.
 
 The demo analysis spreadsheet has two rows to test both supported file types:
 row 1 submits an unannotated FASTA, row 2 submits an annotated EMBL flat file.
@@ -72,28 +93,65 @@ row 1 submits an unannotated FASTA, row 2 submits an annotated EMBL flat file.
 ```bash
 cd analysis
 python analysis.py --demo
+cd ..
 ```
 
-Or HPC: `ena_object="analysis"`, `demo="true"`.
+Or HPC: set `ena_object="analysis"` and `demo="true"` in `hpc.sh`, then
+`sbatch hpc.sh`.
+
+**Where to find the accession:** same as step 2 — Webin-CLI prints the ERZ
+accession(s) in the terminal or SLURM `.out` file. Reports are at
+`analysis/logs/<SAMPLE>/webin-cli.report`.
 
 If all three steps complete without ENA errors, your setup works. You're
 ready to plug in real data.
 
-## About the verbose output
 
-When you use `--demo`, the scripts print detailed `[demo]` trace lines showing
-what's happening at each step: which config file was loaded, what the
-spreadsheet contains, how files are being staged and compressed, what endpoint
-is being used, and so on. This can look like a lot of text, but that's the
-point — it's there to help you see exactly where things go wrong if they do.
+## Notes on the output
 
-None of these `[demo]` lines appear during normal (non-demo) operation.
+### Verbose `[demo]` lines
+
+When you use `--demo`, the scripts print detailed trace lines prefixed with
+`[demo]` showing what's happening at each step: which config file was loaded,
+what the spreadsheet contains, how files are being staged and compressed, what
+endpoint is being used, and so on. This can look like a lot of text, but
+that's the point — it's there to help you see exactly where things go wrong
+if they do. None of these lines appear during normal (non-demo) operation.
+
+### Java warnings
+
+When running `runs.py` or `analysis.py`, you may see warnings from Java like:
+
+```
+WARNING: A restricted method in java.lang.System has been called
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+```
+
+**These are harmless.** They come from the Webin-CLI JAR interacting with
+newer Java versions and do not affect the submission. As long as you see
+"The submission has been completed successfully" above the warnings, everything
+worked.
+
+### Webin-CLI version notice
+
+You may also see a notice like:
+
+```
+INFO : A new application version is available. Please download the latest version ...
+```
+
+This means a newer Webin-CLI JAR is available. You can download it from
+https://github.com/enasequence/webin-cli/releases and replace the JAR file
+in the ENflorA root. Update the `jar:` path in `config.yaml` and
+`demo/config.yaml` if the filename changes.
+
 
 ## What's in this folder
 
 ```
 demo/
-├── config.yaml                  # Config used by --demo (don't edit unless you know what you're doing)
+├── config.yaml                  # Config used by --demo (don't edit unless
+│                                #   you know what you're doing)
 ├── DemoBiosampleList.xlsx       # One Arabidopsis thaliana sample
 ├── DemoExperimentList.xlsx      # One paired-end Illumina MiSeq read set
 ├── DemoAnalysisList.xlsx        # Two rows: one FASTA + one EMBL flat file
@@ -104,6 +162,7 @@ demo/
 │   └── demo_annotation.embl    # Same 2 contigs as annotated EMBL flat file
 └── README.md                   # You are here
 ```
+
 
 ## Spreadsheet details
 
