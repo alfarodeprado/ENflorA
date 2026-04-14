@@ -7,7 +7,7 @@ Java, Webin-CLI, Python dependencies) is good to go for real data.
 
 All sequence files here are random synthetic DNA. The ENA test server checks
 that the format is valid but doesn't care about biological meaning, and it
-automatically deletes test submissions after a few days.
+automatically deletes test submissions the next day.
 
 
 ## Before you start
@@ -74,10 +74,9 @@ cd ..
 Or HPC: set `ena_object="runs"` and `demo="true"` in `hpc.sh`, then
 `sbatch hpc.sh`.
 
-**Where to find the accession:** Webin-CLI prints the assigned ERR accession
-in the terminal output (look for "The following run accession was assigned to
-the submission"). On HPC, check `logs/ENflorA_<jobid>.out`. The submission
-report is also at `runs/logs/<SAMPLE>/webin-cli.report`.
+**Where to find the accession:** The script prints the assigned ERR (run) and ERX (experiment) accession(s) 
+to the terminal as soon as they're returned by ENA. They are also saved to `runs/demo_submission/run_accessions.txt`. 
+On HPC, both appear in `logs/ENflorA_<jobid>.out`.
 
 Open `demo/DemoAnalysisList.xlsx` and paste the ERR accession into the
 RUN_REF column (cells C2 and C3).
@@ -99,9 +98,10 @@ cd ..
 Or HPC: set `ena_object="analysis"` and `demo="true"` in `hpc.sh`, then
 `sbatch hpc.sh`.
 
-**Where to find the accession:** same as step 2 — Webin-CLI prints the ERZ
-accession(s) in the terminal or SLURM `.out` file. Reports are at
-`analysis/logs/<SAMPLE>/webin-cli.report`.
+**Where to find the accession:** same as step 2 — The script prints the assigned ERZ 
+(analysis) accession(s) to the terminal. 
+They are also saved to `analysis/demo_submission/analysis_accessions.txt`. 
+On HPC, both appear in `logs/ENflorA_<jobid>.out`.
 
 If all three steps complete without ENA errors, your setup works. You're
 ready to plug in real data.
