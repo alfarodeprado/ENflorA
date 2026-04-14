@@ -16,9 +16,9 @@ For background on ENA's object types and metadata model, see the
 ## Index
 
 - [How it works](#how-it-works)
-- [Try it first: demo mode](#try-it-first-demo-mode)
 - [Requirements](#requirements)
 - [Installation and setup](#installation-and-setup)
+- [Try it first: demo mode](#try-it-first-demo-mode)
 - [Configuration (`config.yaml`)](#configuration-configyaml)
 - [Folder layout](#folder-layout)
 - [Script reference](#script-reference)
@@ -78,26 +78,6 @@ Each spreadsheet template has a `DATA` sheet (where you fill in your rows) and
 an `INFO` sheet explaining every column. If you prefer plain text, the scripts
 also accept tab-separated files (`.tsv`, `.tab`, or `.txt`) with the same
 column headers.
-
-
-## Try it first: demo mode
-
-Before using real data, you can do a complete dry run with bundled synthetic
-sequences. This verifies that your setup — credentials, Python, Java,
-Webin-CLI — is working end-to-end.
-
-```bash
-cd biosamples && python biosamples.py --demo
-cd runs      && python runs.py --demo
-cd analysis  && python analysis.py --demo
-```
-
-Demo mode submits to ENA's test server (data gets auto-deleted after a few
-days), prints verbose `[demo]` trace lines so you can see exactly what's
-happening, and is hardcoded to never touch the live server.
-
-See [`demo/README.md`](demo/README.md) for the full step-by-step walkthrough,
-including how to run it from the HPC.
 
 
 ## Requirements
@@ -161,7 +141,6 @@ You don't need to call `set_env.py` yourself.
 ```bash
 python set_env.py -s     # create/update virtual environment
 python set_env.py -r     # open a shell with venv activated
-cd biosamples && python biosamples.py
 ```
 On another HPC with `module` support, add `-H` to load Java:
 `python set_env.py -s -r -H`
@@ -171,7 +150,6 @@ match your cluster.)
 **Option C — Manual:**
 ```bash
 pip install pandas openpyxl biopython pyyaml
-cd biosamples && python biosamples.py
 ```
 
 ### Credentials
@@ -179,6 +157,28 @@ cd biosamples && python biosamples.py
 Put your Webin login in `credentials.txt` at the repo root (two lines:
 username, then password). The file ships with placeholder values — replace
 them with your own. You can also pass credentials via `-u` / `-p` flags.
+
+To verify that everything is set up correctly, run the demo (see next section).
+
+
+## Try it first: demo mode
+
+Before using real data, you can do a complete dry run with bundled synthetic
+sequences. This verifies that your setup — credentials, Python, Java,
+Webin-CLI — is working end-to-end.
+
+```bash
+cd biosamples && python biosamples.py --demo
+cd runs      && python runs.py --demo
+cd analysis  && python analysis.py --demo
+```
+
+Demo mode submits to ENA's test server (data gets auto-deleted the next day in the
+test server), prints verbose `[demo]` trace lines so you can see exactly what's
+happening, and is hardcoded to never touch the live server.
+
+See [`demo/README.md`](demo/README.md) for the full step-by-step walkthrough,
+including how to run it from the HPC.
 
 
 ## Configuration (`config.yaml`)
@@ -274,11 +274,12 @@ submissions.
 |---|---|
 | **Config keys** | `data_runs`, `sub_dir_runs`, `credentials`, `jar`, `submit`, `live` |
 | **Input** | `ExperimentList.xlsx` or `.tsv`/`.tab`/`.txt` — one row per read set, with paths to FASTQ/BAM/CRAM files |
-| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed read files per sample |
+| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed read files per sample, `submission/run_accessions.txt` |
 | **Submits via** | Webin-CLI (`-context reads`) |
 
 Handles paired-end reads (FASTQ1 + FASTQ2 columns), single-end, BAM, and CRAM.
 Already-compressed files are symlinked rather than re-compressed.
+On successful submission, accessions are printed to the terminal and appended to submission/run_accessions.txt (one tab-separated line per submitted row, with a (test) suffix for test-server submissions).
 
 ### `analysis.py`
 
@@ -286,7 +287,7 @@ Already-compressed files are symlinked rather than re-compressed.
 |---|---|
 | **Config keys** | `data_analysis`, `sub_dir_analysis`, `credentials`, `jar`, `submit`, `live`, `assembly_level`, `mingaplength` |
 | **Input** | `AnalysisList.xlsx` or `.tsv`/`.tab`/`.txt` — one row per assembly, with either a `FLATFILE` (.embl/.gb) or `FASTA` column |
-| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed sequence files (+ `chr_list.txt` for chromosome-level) |
+| **Outputs** | `submission/<SAMPLE>/manifest.txt` + compressed sequence files (+ `chr_list.txt` for chromosome-level), `submission/analysis_accessions.txt` |
 | **Submits via** | Webin-CLI (`-context genome`) |
 
 Assembly level handling:
@@ -296,6 +297,8 @@ Assembly level handling:
 - **Scaffold:** requires either an `AGP` column or `MINGAPLENGTH` (set per-row
   or globally in config).
 - **Contig:** no extra files needed.
+
+On successful submission, accessions are printed to the terminal and appended to submission/analysis_accessions.txt (one tab-separated line per submitted row, with a (test) suffix for test-server submissions).
 
 ### `hpc.sh`
 
@@ -350,11 +353,21 @@ defaults:
 
 ## Logs and receipts
 
-All scripts write logs to a `logs/` directory:
+All scripts write logs to a `logs/` directory and assigned accessions to a
+plain-text file inside their `submission/` folder. The accessions files are
+the easiest way to find the IDs you'll need for the next step:
 
-- `biosamples.py` saves XML receipts and appends accessions to
-  `submission/biosample_accessions.txt`.
-- `runs.py` and `analysis.py` create per-sample subfolders under `logs/`
-  and automatically clean stale validation caches before each submission.
+- `biosamples/submission/biosample_accessions.txt` — SAMEA accessions
+- `runs/submission/run_accessions.txt` — ERX (experiment) and ERR (run) accessions
+- `analysis/submission/analysis_accessions.txt` — ERZ accessions
+
+All three files are appended to across runs (not overwritten), with
+deduplication and a `(test)` suffix for test-server submissions. Accessions
+are also printed to the terminal as soon as they're assigned, so on the HPC
+you'll see them in `logs/ENflorA_<jobid>.out`.
+
+`runs.py` and `analysis.py` additionally create per-sample subfolders under
+`logs/` (containing the full Webin-CLI report and validation files) and
+automatically clean stale validation caches before each submission.
 
 It's safe to delete `logs/` entirely to start fresh.

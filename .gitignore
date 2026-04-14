@@ -2,3 +2,7 @@
 logs/
 submission/
 demo_submission/
+*.xml
+biosamples/biosample_accessions.txt
+runs/run_accessions.txt
+analysis/analysis_accessions.txt

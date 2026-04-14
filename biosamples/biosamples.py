@@ -319,6 +319,20 @@ def submit_data(username, password, submission_dir="submission", logs_dir="logs"
                 alias = samp.attrib.get('alias')
                 records.append((acc, alias))
 
+            # Print accessions to stdout (also visible in SLURM .out files on HPC)
+            if success == 'true' and records:
+                test_note = " (test submission)" if url == TEST_ENDPOINT else ""
+                print(f"\nBiosample registration successful{test_note}.")
+                print(f"The following accession(s) were assigned:")
+                for acc, alias in records:
+                    print(f"  {acc}\t(alias: {alias})")
+                print()
+            elif success != 'true':
+                for msg in root.findall('.//ERROR'):
+                    print(f"ERROR: {msg.text}")
+                for msg in root.findall('.//INFO'):
+                    print(f"INFO: {msg.text}")
+
             # Write to text file (appends, deduplicates)
             out_file = os.path.join(submission_dir, 'biosample_accessions.txt')
             write_mode = "a+" if os.path.exists(out_file) else "w+"
@@ -333,7 +347,7 @@ def submit_data(username, password, submission_dir="submission", logs_dir="logs"
                         line += " (test)"
                     if line not in existing:
                         out.write(line + "\n")
-            print(f"Accessions written to {out_file}")
+            print(f"Accessions also saved to: {out_file}")
         except Exception as e:
             print(f"Error parsing receipt XML: {e}")
     else:

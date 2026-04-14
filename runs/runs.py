@@ -11,6 +11,7 @@ import subprocess
 import shutil
 import glob
 from collections import defaultdict
+import xml.etree.ElementTree as ET
 
 # --- Verbose logging (enabled by --demo) ---
 VERBOSE = False
@@ -220,7 +221,57 @@ def drop_cached_validation(log_subdir: str):
         except OSError as exc:
             print(f"  Could not remove {path}: {exc}")
 
-def submit_manifests(manifests, jar, user, pwd, live, logs_dir):
+def parse_runs_receipt(log_subdir):
+    """
+    Find and parse the Webin-CLI receipt.xml in a sample's log subdir.
+    Returns (success, [(experiment_acc, run_acc, alias), ...]) or (None, []) if not found.
+    """
+    receipts = glob.glob(os.path.join(log_subdir, "reads", "*", "submit", "receipt.xml"))
+    if not receipts:
+        return None, []
+    try:
+        tree = ET.parse(receipts[0])
+        root = tree.getroot()
+        success = root.attrib.get('success', 'false')
+        records = []
+        # Webin-CLI typically returns a paired EXPERIMENT + RUN per submission
+        exps = root.findall('EXPERIMENT')
+        runs_ = root.findall('RUN')
+        # Pair them up by index (Webin-CLI emits one of each per manifest)
+        for i in range(max(len(exps), len(runs_))):
+            exp_acc = exps[i].attrib.get('accession') if i < len(exps) else None
+            run_acc = runs_[i].attrib.get('accession') if i < len(runs_) else None
+            alias = (runs_[i].attrib.get('alias') if i < len(runs_)
+                     else exps[i].attrib.get('alias') if i < len(exps) else None)
+            records.append((exp_acc, run_acc, alias))
+        return success, records
+    except Exception as e:
+        print(f"  Could not parse receipt {receipts[0]}: {e}")
+        return None, []
+
+def append_run_accessions(records, sub_dir, live):
+    """
+    Append run/experiment accessions to submission/run_accessions.txt.
+    Deduplicates and adds a (test) suffix for test-server submissions.
+    """
+    if not records:
+        return
+    out_file = os.path.join(sub_dir, "run_accessions.txt")
+    write_mode = "a+" if os.path.exists(out_file) else "w+"
+    with open(out_file, write_mode) as out:
+        out.seek(0)
+        existing = {l.strip() for l in out if l.strip()}
+        if not existing:
+            out.write("experiment_accession\trun_accession\talias\n")
+        for exp_acc, run_acc, alias in records:
+            line = f"{exp_acc}\t{run_acc}\t{alias}"
+            if not live:
+                line += " (test)"
+            if line not in existing:
+                out.write(line + "\n")
+    print(f"Run accession(s) also saved to: {out_file}")
+
+def submit_manifests(manifests, jar, user, pwd, live, logs_dir, sub_dir):
     vlog(f"Submitting {len(manifests)} manifest(s) via Webin-CLI (context=reads, live={live})")
     for mf in manifests:
         inp = os.path.dirname(mf)
@@ -255,6 +306,18 @@ def submit_manifests(manifests, jar, user, pwd, live, logs_dir):
             print(res.stdout)
         if res.stderr:
             print(res.stderr, file=sys.stderr)
+        
+        # Parse receipt and report accessions
+        if res.returncode == 0:
+            success, records = parse_runs_receipt(log_subdir)
+            if success == 'true' and records:
+                test_note = " (test submission)" if not live else ""
+                print(f"\nRun submission successful{test_note}.")
+                print(f"The following accession(s) were assigned:")
+                for exp_acc, run_acc, alias in records:
+                    print(f"  EXPERIMENT: {exp_acc}\tRUN: {run_acc}\t(alias: {alias})")
+                print()
+                append_run_accessions(records, sub_dir, live)
     
     # remove compressed files?
 
@@ -367,7 +430,7 @@ def main():
             )
             if not manifests:
                 sys.exit("No manifests found; run with -c your.xlsx first.")
-        submit_manifests(manifests, jar, user, pwd, live, logs)
+        submit_manifests(manifests, jar, user, pwd, live, logs, sub_dir)
 
     if not table_path and not submit:
         p.print_help()
