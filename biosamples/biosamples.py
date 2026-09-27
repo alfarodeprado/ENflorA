@@ -715,12 +715,20 @@ def submit_data(username, password, submission_dir="submission", logs_dir="logs"
                 for msg in root.findall('.//INFO'):
                     print(f"INFO: {msg.text}")
 
-            # Write to text file (appends, deduplicates)
-            out_file = os.path.join(submission_dir, 'biosample_accessions.txt')
-            server = "test" if url == TEST_ENDPOINT else "live"
-            rows = [f"{acc}\t{alias}\t{server}" for acc, alias in records]
-            write_accession_file(out_file, BIOSAMPLE_ACCESSION_HEADER, rows)
-            print(f"Accessions also saved to: {out_file}")
+            # Write to text file (appends, deduplicates). Only on success: when
+            # ENA rejects a submission it still reports the accessions it would
+            # have assigned, but those samples were never registered, and
+            # resolve_accessions.py must not pick them up as real.
+            if success == 'true' and records:
+                out_file = os.path.join(submission_dir, 'biosample_accessions.txt')
+                server = "test" if url == TEST_ENDPOINT else "live"
+                rows = [f"{acc}\t{alias}\t{server}" for acc, alias in records]
+                write_accession_file(out_file, BIOSAMPLE_ACCESSION_HEADER, rows)
+                print(f"Accessions also saved to: {out_file}")
+            elif success != 'true':
+                print("Submission failed, so no accessions were saved.")
+            else:
+                print("The receipt lists no sample accessions, so nothing was saved.")
         except Exception as e:
             print(f"Error parsing receipt XML: {e}")
     else:
