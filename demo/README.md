@@ -60,6 +60,11 @@ You'll need the SAMEA accession for the next two steps. Open
 into the SAMPLE column (cell B2 in the experiment sheet; cells B2 and B3 in
 the analysis sheet).
 
+Pasting by hand is fine for the demo. With real data you can let
+`resolve_accessions.py` fill the accessions in for you instead: see
+[Passing accessions between steps](../README.md#passing-accessions-between-steps)
+in the main README.
+
 ### Step 2 — Submit demo reads
 
 Make sure you've filled in STUDY (from step 0) and SAMPLE (from step 1) in
